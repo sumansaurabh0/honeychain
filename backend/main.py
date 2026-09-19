@@ -11,7 +11,6 @@ from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_en
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DATABASE_URL=os.getenv("DATABASE_URL","sqlite:///./honey_chain.db")
-PUBLIC_FRONTEND_URL="https://honey-chain-frontend.onrender.com"
 connect_args={"check_same_thread":False} if DATABASE_URL.startswith("sqlite") else {}
 engine=create_engine(DATABASE_URL,connect_args=connect_args)
 SessionLocal=sessionmaker(bind=engine,autocommit=False,autoflush=False)
@@ -1143,10 +1142,10 @@ statusEl.className=
 "value "+(status==="VALID"?"ok":"warn");
 
 document.getElementById("qrText").textContent=
-PUBLIC_FRONTEND_URL+"/verify/"+(lines.batch_id||batchId);
+"/verify/"+(lines.batch_id||batchId);
 
 renderQr(
-PUBLIC_FRONTEND_URL+"/verify/"+(lines.batch_id||batchId)
+"/verify/"+(lines.batch_id||batchId)
 );
 
 }catch(err){
@@ -1181,9 +1180,9 @@ details:"Consumer verification available"
 ]);
 
 document.getElementById("qrText").textContent=
-PUBLIC_FRONTEND_URL+"/verify/HC2026-001";
+"/verify/HC2026-001";
 
-renderQr(PUBLIC_FRONTEND_URL+"/verify/HC2026-001");
+renderQr("/verify/HC2026-001");
 
 }
 
@@ -1322,7 +1321,7 @@ if(window.QRious){
 
 new QRious({
 element:canvas,
-value:url,
+value:location.origin+url,
 size:180
 });
 
@@ -1839,7 +1838,7 @@ def verify_batch(batch_id: str, db: Session = Depends(get_db)):
 def batch_qr(batch_id:str):
     return {
         "batch_id":batch_id,
-        "verification_url":f"{PUBLIC_FRONTEND_URL}/verify/{batch_id}"
+        "verification_url":f"/verify/{batch_id}"
     }
 
 

@@ -164,7 +164,7 @@ function FarmerView({ onConsumer }) {
 function BatchQrPanel({ batchId }) {
   const [image, setImage] = useState('')
   const [error, setError] = useState('')
-  const publicUrl = (import.meta.env.VITE_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, '')
+  const publicUrl = 'https://honey-chain-frontend.onrender.com'
   const verificationUrl = `${publicUrl}/verify/${encodeURIComponent(batchId)}`
 
   useEffect(() => {

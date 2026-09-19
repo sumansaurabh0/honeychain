@@ -217,8 +217,26 @@ function ConsumerView({ initialBatchId = '' }) {
   const verifyBatch = async () => {
     const id = batchId.trim()
     if (!id) return
-    setState('loading'); setError(''); setResult(null); setQr(null)
-    try { const [verification, qrData] = await Promise.all([request(`/verify/${id}`), request(`/batches/${id}/qr`)]); setResult(verification); setQr(qrData); setState('success') } catch (requestError) { setError(getErrorMessage(requestError, 'Verification could not be completed.')); setState(requestError?.status === 404 ? 'not-found' : 'error') }
+    setState('loading')
+    setError('')
+    setResult(null)
+    setQr(null)
+
+    try {
+      const verification = await request(`/verify/${id}`)
+      setResult(verification)
+      setState('success')
+
+      try {
+        const qrData = await request(`/batches/${id}/qr`)
+        setQr(qrData)
+      } catch {
+        setQr(null)
+      }
+    } catch (requestError) {
+      setError(getErrorMessage(requestError, 'Verification could not be completed.'))
+      setState(requestError?.status === 404 ? 'not-found' : 'error')
+    }
   }
 
   useEffect(() => {

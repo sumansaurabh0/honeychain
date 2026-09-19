@@ -3,7 +3,7 @@ import QrScanner from 'qr-scanner'
 import QRCode from 'qrcode'
 import './App.css'
 
-const api = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
+const api = 'https://honey-chain-backend-tjvt.onrender.com/api'
 const HIVE_ID = 'HIVE001'
 
 const request = async (path) => {

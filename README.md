@@ -27,6 +27,12 @@ Set `VITE_API_URL` for a deployed frontend. The development fallback is local-on
 
 Set `VITE_PUBLIC_APP_URL` to the deployed frontend origin when generating bottle QR images. Local development falls back to the current browser origin; ESP32 still requires the PC LAN IPv4 address rather than `localhost`.
 
+## Authentication
+
+Farmer registration creates a `PENDING` account. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the backend environment to provision the administrator once; do not commit these values. Set `FRONTEND_ORIGINS` to a comma-separated list of browser origins when using cookie sessions across deployments. Production cookies become secure when `ENVIRONMENT=production` or `COOKIE_SECURE=true`.
+
+ESP32 and simulator sensor ingestion remains unauthenticated for compatibility with the existing device flow. Farmer batch, traceability, and ledger-anchor writes require a verified farmer session; public batch verification and QR routes remain open to consumers.
+
 ## Demo flow
 
 - Create or use an existing hive such as `HIVE001`.

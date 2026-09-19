@@ -1,16 +1,19 @@
 import hashlib
 import json
 import os
+import secrets
 from datetime import datetime
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_engine
+from fastapi.responses import HTMLResponse, JSONResponse
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-DATABASE_URL=os.getenv("DATABASE_URL","sqlite:///./honey_chain.db")
+PROJECT_ROOT=Path(__file__).resolve().parents[1]
+DATABASE_URL=os.getenv("DATABASE_URL") or f"sqlite:///{PROJECT_ROOT / 'honey_chain.db'}"
 connect_args={"check_same_thread":False} if DATABASE_URL.startswith("sqlite") else {}
 engine=create_engine(DATABASE_URL,connect_args=connect_args)
 SessionLocal=sessionmaker(bind=engine,autocommit=False,autoflush=False)
@@ -39,6 +42,7 @@ class HoneyBatch(Base):
     id=Column(Integer,primary_key=True,index=True)
     batch_id=Column(String,unique=True,index=True,nullable=False)
     hive_id=Column(String,index=True,nullable=False)
+    farmer_id=Column(String,index=True,nullable=True)
     quantity_kg=Column(Float,default=12.5)
     harvest_date=Column(String,default="2026-09-19")
     beekeeper=Column(String,default="Honey Chain Cooperative")
@@ -70,6 +74,27 @@ class LedgerBlock(Base):
     current_hash=Column(String,default="")
 
 
+class Farmer(Base):
+    __tablename__="farmers"
+
+    id=Column(Integer,primary_key=True,index=True)
+    full_name=Column(String,nullable=False)
+    email=Column(String,unique=True,index=True,nullable=False)
+    phone=Column(String,nullable=False)
+    farmer_id=Column(String,unique=True,index=True,nullable=False)
+    farm_name=Column(String,nullable=False)
+    farm_location=Column(String,nullable=True)
+    experience=Column(String,nullable=True)
+    password_hash=Column(String,nullable=False)
+    password_salt=Column(String,nullable=False)
+    role=Column(String,default="FARMER")
+    status=Column(String,default="PENDING")
+    created_at=Column(DateTime,default=datetime.utcnow)
+    verified_at=Column(DateTime,nullable=True)
+    last_login=Column(DateTime,nullable=True)
+    session_token=Column(String,nullable=True,index=True)
+
+
 DEMO_SENSOR={
     "hive_id":"HIVE-001",
     "temperature":26.7,
@@ -91,6 +116,128 @@ def get_db():
 
 def ensure_schema():
     Base.metadata.create_all(bind=engine)
+
+    inspector=inspect(engine)
+    table_names=set(inspector.get_table_names())
+
+    if "batches" in table_names:
+        batch_columns={column["name"] for column in inspector.get_columns("batches")}
+        if "farmer_id" not in batch_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE batches ADD COLUMN farmer_id VARCHAR"))
+
+    if "farmers" in table_names:
+        farmer_columns={column["name"] for column in inspector.get_columns("farmers")}
+        required_columns=[
+            "full_name","email","phone","farmer_id","farm_name","farm_location",
+            "experience","password_hash","password_salt","role","status",
+            "created_at","verified_at","last_login","session_token"
+        ]
+        for column_name in required_columns:
+            if column_name not in farmer_columns:
+                with engine.begin() as connection:
+                    connection.execute(text(f"ALTER TABLE farmers ADD COLUMN {column_name} VARCHAR"))
+
+
+def _hash_password(password:str,salt:str)->str:
+    derived=hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt.encode("utf-8"),
+        n=2**14,
+        r=8,
+        p=1,
+        dklen=64,
+    )
+    return derived.hex()
+
+
+def _session_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _farmers_to_dict(farmer: Farmer) -> Dict[str, Any]:
+    return {
+        "id": farmer.id,
+        "full_name": farmer.full_name,
+        "email": farmer.email,
+        "phone": farmer.phone,
+        "farmer_id": farmer.farmer_id,
+        "farm_name": farmer.farm_name,
+        "farm_location": farmer.farm_location,
+        "experience": farmer.experience,
+        "role": farmer.role,
+        "status": farmer.status,
+        "created_at": farmer.created_at.isoformat() if farmer.created_at else None,
+        "verified_at": farmer.verified_at.isoformat() if farmer.verified_at else None,
+        "last_login": farmer.last_login.isoformat() if farmer.last_login else None,
+    }
+
+
+def _get_session_token(request: Request) -> Optional[str]:
+    return request.cookies.get("honeychain_session")
+
+
+def get_current_farmer(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Farmer:
+    token = _get_session_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    farmer = db.query(Farmer).filter(Farmer.session_token == token).first()
+    if farmer is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    return farmer
+
+
+def require_verified_farmer(
+    farmer: Farmer = Depends(get_current_farmer),
+) -> Farmer:
+    if farmer.status != "VERIFIED":
+        raise HTTPException(status_code=403, detail="Farmer account is not verified")
+    return farmer
+
+
+def require_admin(
+    farmer: Farmer = Depends(get_current_farmer),
+) -> Farmer:
+    if farmer.role != "ADMIN" or farmer.status != "VERIFIED":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return farmer
+
+
+def ensure_default_admin():
+    with SessionLocal() as db:
+        admin_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
+        admin_password = os.getenv("ADMIN_PASSWORD") or ""
+
+        if not admin_email or not admin_password:
+            return
+
+        admin = db.query(Farmer).filter(Farmer.email == admin_email).first()
+        if admin is not None:
+            return
+
+        salt = secrets.token_hex(16)
+        admin = Farmer(
+            full_name="Honey Chain Admin",
+            email=admin_email,
+            phone="0000000000",
+            farmer_id="ADMIN-000",
+            farm_name="Honey Chain Operations",
+            farm_location="Head Office",
+            experience="Administrator",
+            password_hash=_hash_password(admin_password, salt),
+            password_salt=salt,
+            role="ADMIN",
+            status="VERIFIED",
+            verified_at=datetime.utcnow(),
+        )
+        db.add(admin)
+
+        db.commit()
 
 
 def _coerce_float(value:Any,default:float)->float:
@@ -164,6 +311,7 @@ def _safe_batch_record(batch:HoneyBatch)->Dict[str,Any]:
         "id":batch.id,
         "batch_id":batch.batch_id,
         "hive_id":batch.hive_id,
+        "farmer_id":batch.farmer_id,
         "quantity_kg":batch.quantity_kg,
         "harvest_date":batch.harvest_date,
         "beekeeper":batch.beekeeper,
@@ -383,7 +531,14 @@ app=FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv(
+            "FRONTEND_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173,https://honeychain.vercel.app",
+        ).split(",")
+        if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -393,6 +548,190 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_event():
     ensure_schema()
+    ensure_default_admin()
+
+
+@app.post("/api/auth/register")
+def register_farmer(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    email = str(payload.get("email") or "").strip().lower()
+    full_name = str(payload.get("full_name") or "").strip()
+    phone = str(payload.get("phone") or "").strip()
+    farmer_id = str(payload.get("farmer_id") or "").strip()
+    farm_name = str(payload.get("farm_name") or "").strip()
+    farm_location = str(payload.get("farm_location") or "").strip()
+    experience = str(payload.get("experience") or "").strip()
+    password = str(payload.get("password") or "")
+
+    if not all([email, full_name, phone, farmer_id, farm_name, password]):
+        raise HTTPException(status_code=400, detail="Missing required farmer registration fields")
+
+    if db.query(Farmer.id).filter(Farmer.email == email).first():
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    if db.query(Farmer.id).filter(Farmer.farmer_id == farmer_id).first():
+        raise HTTPException(status_code=409, detail="Farmer ID already registered")
+
+    salt = secrets.token_hex(8)
+    farmer = Farmer(
+        full_name=full_name,
+        email=email,
+        phone=phone,
+        farmer_id=farmer_id,
+        farm_name=farm_name,
+        farm_location=farm_location or None,
+        experience=experience or None,
+        password_hash=_hash_password(password, salt),
+        password_salt=salt,
+        role="FARMER",
+        status="PENDING",
+        created_at=datetime.utcnow(),
+    )
+
+    db.add(farmer)
+    db.commit()
+    db.refresh(farmer)
+
+    return _farmers_to_dict(farmer)
+
+
+@app.post("/api/auth/login")
+def login_farmer(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    email = str(payload.get("email") or "").strip().lower()
+    password = str(payload.get("password") or "")
+
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+
+    farmer = db.query(Farmer).filter(Farmer.email == email).first()
+    if farmer is None:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if not secrets.compare_digest(_hash_password(password, farmer.password_salt), farmer.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if farmer.status != "VERIFIED":
+        raise HTTPException(status_code=403, detail=f"Farmer account is {farmer.status.lower()}")
+
+    session = _session_token()
+    farmer.session_token = session
+    farmer.last_login = datetime.utcnow()
+    db.commit()
+
+    response = JSONResponse(content={"status": "ok", **_farmers_to_dict(farmer)})
+    response.set_cookie(
+        key="honeychain_session",
+        value=session,
+        httponly=True,
+        samesite="lax",
+        secure=(os.getenv("COOKIE_SECURE", "").lower() == "true" or os.getenv("ENVIRONMENT", "").lower() == "production"),
+        max_age=60 * 60 * 12,
+    )
+    return response
+
+
+@app.post("/api/auth/logout")
+def logout_farmer(request: Request, db: Session = Depends(get_db)):
+    token = _get_session_token(request)
+    if token:
+        farmer = db.query(Farmer).filter(Farmer.session_token == token).first()
+        if farmer:
+            farmer.session_token = None
+            db.commit()
+
+    response = JSONResponse(content={"status": "ok"})
+    response.delete_cookie(key="honeychain_session")
+    return response
+
+
+@app.get("/api/auth/me")
+def get_authenticated_farmer(farmer: Farmer = Depends(get_current_farmer)):
+    return _farmers_to_dict(farmer)
+
+
+@app.get("/api/admin/farmers")
+def list_pending_farmers(
+    status: str = Query("PENDING"),
+    admin: Farmer = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    status = status.strip().upper()
+    if status not in {"PENDING", "VERIFIED", "REJECTED"}:
+        raise HTTPException(status_code=400, detail="Invalid farmer status")
+    farmers = db.query(Farmer).filter(Farmer.status == status).order_by(Farmer.created_at.asc()).all()
+    return [_farmers_to_dict(item) for item in farmers]
+
+
+@app.post("/api/admin/farmers/{farmer_id}/approve")
+def approve_farmer(farmer_id: str, admin: Farmer = Depends(require_admin), db: Session = Depends(get_db)):
+    farmer = db.query(Farmer).filter(Farmer.farmer_id == farmer_id).first()
+    if farmer is None:
+        raise HTTPException(status_code=404, detail="Farmer not found")
+
+    farmer.status = "VERIFIED"
+    farmer.verified_at = datetime.utcnow()
+    db.commit()
+    return {"status": "ok", "farmer": _farmers_to_dict(farmer)}
+
+
+@app.post("/api/admin/farmers/{farmer_id}/reject")
+def reject_farmer(farmer_id: str, admin: Farmer = Depends(require_admin), db: Session = Depends(get_db)):
+    farmer = db.query(Farmer).filter(Farmer.farmer_id == farmer_id).first()
+    if farmer is None:
+        raise HTTPException(status_code=404, detail="Farmer not found")
+
+    farmer.status = "REJECTED"
+    farmer.verified_at = None
+    db.commit()
+    return {"status": "ok", "farmer": _farmers_to_dict(farmer)}
+
+
+@app.post("/api/trace/{batch_id}")
+def add_trace_event(
+    batch_id: str,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+    farmer: Farmer = Depends(require_verified_farmer),
+):
+    batch = db.query(HoneyBatch).filter(HoneyBatch.batch_id == batch_id).first()
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    if farmer.role != "ADMIN" and (not batch.farmer_id or farmer.farmer_id != batch.farmer_id):
+        raise HTTPException(status_code=403, detail="You do not own this batch")
+
+    event_name = str(payload.get("event_type") or "TRACE_EVENT").strip().upper()
+    details = str(payload.get("description") or "Trace event recorded").strip()
+
+    db.add(TraceEvent(
+        batch_id=batch.batch_id,
+        event=event_name,
+        details=details,
+        timestamp=datetime.utcnow(),
+        previous_hash=batch.previous_hash,
+        current_hash=batch.current_hash,
+    ))
+
+    db.commit()
+    return {"status": "ok", "batch_id": batch.batch_id, "event": event_name, "details": details}
+
+
+@app.get("/api/trace/{batch_id}")
+def get_trace_events(batch_id: str, db: Session = Depends(get_db)):
+    batch = db.query(HoneyBatch).filter(HoneyBatch.batch_id == batch_id).first()
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    items = _ensure_batch_timeline(db, batch)
+    return [
+        {
+            "id": item.id,
+            "event": item.event,
+            "batch_id": item.batch_id,
+            "details": item.details,
+            "timestamp": item.timestamp.isoformat() if item.timestamp else None,
+        }
+        for item in items
+    ]
 
 
 @app.get("/",response_class=HTMLResponse)
@@ -1592,7 +1931,8 @@ def health_analysis(
 @app.post("/api/batches")
 def create_batch(
     payload:Dict[str,Any],
-    db:Session=Depends(get_db)
+    db:Session=Depends(get_db),
+    farmer: Farmer = Depends(require_verified_farmer),
 ):
     batch_id=str(
         payload.get("batch_id")
@@ -1618,6 +1958,7 @@ def create_batch(
     item=HoneyBatch(
         batch_id=batch_id,
         hive_id=hive_id,
+        farmer_id=farmer.farmer_id,
         quantity_kg=_coerce_float(
             payload.get(
                 "quantity_kg",
@@ -1709,10 +2050,13 @@ def batch_timeline(
 
 
 @app.post("/api/batches/{batch_id}/anchor")
-def anchor_batch(batch_id: str, db: Session = Depends(get_db)):
+def anchor_batch(batch_id: str, db: Session = Depends(get_db), farmer: Farmer = Depends(require_verified_farmer)):
     batch = db.query(HoneyBatch).filter(HoneyBatch.batch_id == batch_id).first()
     if batch is None:
         raise HTTPException(status_code=404, detail="Batch not found")
+
+    if farmer.role != "ADMIN" and (not batch.farmer_id or farmer.farmer_id != batch.farmer_id):
+        raise HTTPException(status_code=403, detail="You do not own this batch")
 
     last_block = db.query(LedgerBlock).filter(
         LedgerBlock.batch_id == batch_id

@@ -3,11 +3,11 @@ import QrScanner from 'qr-scanner'
 import QRCode from 'qrcode'
 import './App.css'
 
-const api = 'https://honey-chain-backend-tjvt.onrender.com/api'
+const api = (import.meta.env.VITE_API_URL || 'https://honey-chain-backend-tjvt.onrender.com/api').replace(/\/$/, '')
 const HIVE_ID = 'HIVE001'
 
 const request = async (path) => {
-  const response = await fetch(`${api}${path}`)
+  const response = await fetch(`${api}${path}`, { credentials: 'include' })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
     const error = new Error(detail || `Request failed (${response.status})`)
@@ -18,7 +18,7 @@ const request = async (path) => {
 }
 
 const post = async (path, body) => {
-  const response = await fetch(`${api}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const response = await fetch(`${api}${path}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
     const error = new Error(detail || `Request failed (${response.status})`)
@@ -186,8 +186,10 @@ function HarvestPanel() {
     submitEvent.preventDefault()
     setSaving(true); setError(''); setMessage('')
     try {
+      const id = form.batch_id.trim()
       await post('/batches', { ...form, hive_id: HIVE_ID, weight: Number(form.weight) })
-      setMessage(`Batch ${form.batch_id} created and linked to ${HIVE_ID}.`)
+      await post(`/batches/${id}/anchor`, {})
+      setMessage(`Batch ${id} created, anchored, and linked to ${HIVE_ID}.`)
       setEvent((current) => ({ ...current, batch_id: form.batch_id }))
       setQrBatchId(form.batch_id)
     } catch (requestError) { setError(getErrorMessage(requestError, 'Unable to create the batch.')) } finally { setSaving(false) }
@@ -254,6 +256,67 @@ function ConsumerView({ initialBatchId = '' }) {
   return <div className="consumer-view"><section className="consumer-hero"><span className="eyebrow">Consumer verification</span><h2>Verified Honey Journey</h2><p>Enter the batch ID on your jar to view its recorded source, harvest details, and traceability integrity.</p><div className="verify-form"><input aria-label="Batch ID" value={batchId} onChange={(event) => setBatchId(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && verifyBatch()} placeholder="Batch ID" /><button className="button primary-button" onClick={verifyBatch} disabled={state === 'loading'}>{state === 'loading' ? 'Checking…' : 'Verify batch'}</button></div></section>{state === 'not-found' && <div className="consumer-message warning-message"><strong>Batch not found</strong><span>Check the ID and try again.</span></div>}{state === 'error' && <div className="consumer-message error-message"><strong>Verification unavailable</strong><span>{error}</span></div>}{result && <section className="verification-result"><div className="verified-banner"><div className="verified-mark">{result.ledger_integrity ? '✓' : '!'}</div><div><span className="section-kicker">Verification result</span><h2>{result.ledger_integrity ? 'Ledger integrity verified' : 'Record integrity needs review'}</h2><p>{result.ledger_integrity ? 'Hash-linked records make changes to recorded traceability history detectable.' : 'The recorded traceability history could not be fully validated.'}</p></div><span className="integrity-pill">{result.ledger_integrity ? 'Verified' : 'Review needed'}</span></div><div className="consumer-details"><div><span>Batch ID</span><strong>{result.batch_id}</strong></div><div><span>Source hive</span><strong>{result.hive_id}</strong></div><div><span>Location</span><strong>{hiveLocation}</strong></div><div><span>Harvest date</span><strong>{result.harvest_date}</strong></div><div><span>Harvest quantity</span><strong>{formatValue(result.quantity_kg, ' kg')}</strong></div><div><span>Batch status</span><strong>{result.status}</strong></div></div><div className="timeline"><div className="section-heading"><div><span className="section-kicker">Your honey's journey</span><h3>Traceability timeline</h3></div></div>{result.traceability?.length ? result.traceability.map((item) => <div className="timeline-item" key={item.id}><span className="timeline-dot" /><div><strong>{item.event_type}</strong><p>{item.description}</p><small>{formatTimestamp(item.timestamp)}</small></div></div>) : <div className="empty-state">No traceability events are available.</div>}</div>{(result.verification_url || qr?.verification_url) && <div className="public-target"><span>Public verification target</span><code>{result.verification_url || qr.verification_url}</code></div>}<span className="verification-time">Checked {formatTimestamp(result.verification_timestamp)}</span></section>}</div>
 }
 
+function AuthPage({ mode }) {
+  const isRegister = mode === 'register'
+  const [form, setForm] = useState({ full_name: '', email: '', phone: '', farmer_id: '', farm_name: '', farm_location: '', experience: '', password: '', confirm_password: '' })
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setError(''); setMessage('')
+    if (isRegister && form.password !== form.confirm_password) {
+      setError('Passwords do not match.')
+      return
+    }
+    setSaving(true)
+    try {
+      const result = await post(isRegister ? '/auth/register' : '/auth/login', isRegister ? form : { email: form.email, password: form.password })
+      if (isRegister) {
+        setMessage('Registration submitted. An administrator must verify your farmer account before login.')
+        setForm({ full_name: '', email: '', phone: '', farmer_id: '', farm_name: '', farm_location: '', experience: '', password: '', confirm_password: '' })
+      } else {
+        navigate(result.role === 'ADMIN' ? '/admin' : '/farmer')
+      }
+    } catch (requestError) {
+      setError(getErrorMessage(requestError, 'Unable to complete this request.'))
+    } finally { setSaving(false) }
+  }
+
+  const fields = isRegister
+    ? [['full_name', 'Full Name'], ['email', 'Email'], ['phone', 'Phone'], ['farmer_id', 'Farmer ID'], ['farm_name', 'Farm Name'], ['farm_location', 'Farm Location'], ['experience', 'Experience']]
+    : [['email', 'Email']]
+
+  return <section className="auth-page"><div className="auth-card"><span className="eyebrow">{isRegister ? 'Farmer onboarding' : 'Secure access'}</span><h2>{isRegister ? 'Register your farm' : 'Farmer login'}</h2><p>{isRegister ? 'Submit your farm details for administrator verification.' : 'Verified farmers can access hive operations and traceability tools.'}</p><form onSubmit={submit}>{fields.map(([key, label]) => <label key={key}>{label}<input required type={key === 'email' ? 'email' : 'text'} value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} /></label>)}<label>Password<input required type="password" minLength="8" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>{isRegister && <label>Confirm Password<input required type="password" minLength="8" value={form.confirm_password} onChange={(event) => setForm({ ...form, confirm_password: event.target.value })} /></label>}<button className="button primary-button" disabled={saving}>{saving ? 'Submitting…' : isRegister ? 'Submit registration' : 'Log in'}</button></form>{message && <p className="action-success" role="status">{message}</p>}{error && <p className="action-error" role="alert">{error}</p>}<button className="button text-button" onClick={() => navigate(isRegister ? '/login' : '/register')}>{isRegister ? 'Already registered? Log in' : 'Need a farmer account? Register'}</button></div></section>
+}
+
+function AdminPage() {
+  const [farmers, setFarmers] = useState([])
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  const loadFarmers = async () => {
+    try { setFarmers(await request('/admin/farmers?status=PENDING')); setError('') } catch (requestError) { setError(getErrorMessage(requestError, 'Admin access is required.')) } finally { setLoading(false) }
+  }
+
+  const decide = async (farmerId, action) => {
+    try { await post(`/admin/farmers/${encodeURIComponent(farmerId)}/${action}`, {}); await loadFarmers() } catch (requestError) { setError(getErrorMessage(requestError, 'Unable to update farmer status.')) }
+  }
+
+  useEffect(() => { loadFarmers() }, [])
+  return <section className="auth-page"><div className="admin-panel"><div className="page-intro"><div><span className="eyebrow">Administration</span><h2>Pending farmer verification</h2><p>Review registration requests before granting traceability write access.</p></div><button className="button secondary-button" onClick={loadFarmers}>Refresh</button></div>{error && <div className="alert" role="alert">{error}</div>}{loading ? <div className="loading-state">Loading requests…</div> : farmers.length ? <div className="admin-table">{farmers.map((farmer) => <div className="admin-row" key={farmer.farmer_id}><div><strong>{farmer.full_name}</strong><span>{farmer.farm_name} · {farmer.farmer_id}</span><small>{farmer.email} · {farmer.farm_location || 'Location not provided'}</small></div><div className="admin-actions"><button className="button primary-button" onClick={() => decide(farmer.farmer_id, 'approve')}>Approve</button><button className="button secondary-button" onClick={() => decide(farmer.farmer_id, 'reject')}>Reject</button></div></div>)}</div> : <div className="empty-state">No pending farmer registrations.</div>}</div></section>
+}
+
+function FarmerGate() {
+  const [farmer, setFarmer] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => { request('/auth/me').then(setFarmer).catch((requestError) => setError(requestError?.status === 403 ? 'Your farmer account is awaiting verification.' : 'Please log in to open the farmer dashboard.')) }, [])
+  if (error) return <section className="auth-page"><div className="auth-card"><span className="eyebrow">Farmer workspace</span><h2>{error}</h2><button className="button primary-button" onClick={() => navigate('/login')}>Open farmer login</button></div></section>
+  if (!farmer) return <section className="auth-page"><div className="loading-state">Checking farmer session…</div></section>
+  return <><section className="farmer-identity"><span className="eyebrow">Verified Farmer</span><strong>{farmer.full_name}</strong><span>{farmer.farm_name} · {farmer.farmer_id}</span><b>{farmer.status}</b></section><FarmerView onConsumer={() => navigate('/verify')} /><HarvestPanel /></>
+}
+
 function navigate(path) {
   window.history.pushState({}, '', path)
   window.dispatchEvent(new PopStateEvent('popstate'))
@@ -288,8 +351,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   useEffect(() => { const update = () => setPath(window.location.pathname); window.addEventListener('popstate', update); return () => window.removeEventListener('popstate', update) }, [])
   const verifyMatch = path.match(/^\/verify\/(.+)$/)
-  const page = verifyMatch ? <ConsumerView initialBatchId={decodeURIComponent(verifyMatch[1])} /> : path === '/verify' ? <ConsumerView /> : path === '/farmer' ? <><FarmerView onConsumer={() => navigate('/verify')} /><HarvestPanel /></> : <><LandingView /><LiveHivePreview /></>
+  const page = verifyMatch ? <ConsumerView initialBatchId={decodeURIComponent(verifyMatch[1])} /> : path === '/verify' ? <ConsumerView /> : path === '/register' ? <AuthPage mode="register" /> : path === '/login' ? <AuthPage mode="login" /> : path === '/admin' ? <AdminPage /> : path === '/farmer' ? <FarmerGate /> : <><LandingView /><LiveHivePreview /></>
   const closeMenu = () => setMenuOpen(false)
   return <main className="app-shell"><header className="site-nav"><button className="brand-lockup" onClick={() => { navigate('/'); closeMenu() }}><span className="brand-mark">HC</span><span><strong>Honey Chain</strong><small>SIH26021 field intelligence</small></span></button><button className="menu-toggle" onClick={() => setMenuOpen((open) => !open)} aria-label="Toggle navigation">☰</button><nav className={menuOpen ? 'open' : ''}><a href="/#top" onClick={closeMenu}>Home</a><a href="/#how-it-works" onClick={closeMenu}>How It Works</a><a href="/#beekeepers" onClick={closeMenu}>For Beekeepers</a><a href="/#traceability" onClick={closeMenu}>Traceability</a><a href="/#verify" onClick={closeMenu}>Verify Honey</a></nav><div className="nav-actions"><button className="nav-verify" onClick={() => { navigate('/verify'); closeMenu() }}>Verify Bottle</button><button className="nav-farmer" onClick={() => { navigate('/farmer'); closeMenu() }}>Farmer Dashboard</button></div></header>{page}<footer className="site-footer"><button onClick={() => navigate('/')}>Honey Chain</button><span>SIH26021</span><div><a href="/#top">Home</a><a href="/#how-it-works">How It Works</a><a href="/#verify">Verify Honey</a><a href="/farmer">Farmer Dashboard</a></div></footer></main>
 }
-

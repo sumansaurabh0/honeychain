@@ -1,0 +1,33 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "e:/honey-chain/backend/venv/Scripts/python.exe": true,
+        "/^cd e:\\\\honey-chain\\\\backend; & 'e:/honey-chain/backend/venv/Scripts/python\\.exe' -c \"import sys; sys\\.path\\.insert\\(0, '\\.'\\); from app\\.main import app; print\\('imports ok'\\); from fastapi\\.testclient import TestClient; client=TestClient\\(app\\); print\\('/db-test', client\\.get\\('/db-test'\\)\\.status_code\\); print\\('/api/dashboard', client\\.get\\('/api/dashboard'\\)\\.status_code\\); print\\('/api/hives', client\\.get\\('/api/hives'\\)\\.status_code\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^& 'e:/honey-chain/backend/venv/Scripts/python\\.exe' -c \"import sys; sys\\.path\\.insert\\(0, '\\.'\\); from app\\.main import app; paths=\\[route\\.path for route in app\\.routes\\]; print\\(paths\\); assert '/' in paths; assert '/db-test' in paths; assert '/api/dashboard' in paths; assert '/api/hives' in paths; assert '/api/verify/\\{batch_id\\}' in paths; print\\('backend route import check ok'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^& 'e:/honey-chain/backend/venv/Scripts/python\\.exe' -c \"import sys; sys\\.path\\.insert\\(0, '\\.'\\); from app\\.main import app; routes = \\[getattr\\(r, 'path', None\\) for r in app\\.router\\.routes\\]; print\\(routes\\); assert any\\(p == '/' for p in routes\\); assert any\\(p == '/db-test' for p in routes\\); assert any\\(p == '/api/dashboard' for p in routes\\); assert any\\(p == '/api/hives' for p in routes\\); assert any\\(p == '/api/verify/\\{batch_id\\}' for p in routes\\); print\\('backend route import check ok'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^& 'e:/honey-chain/backend/venv/Scripts/python\\.exe' -c \"import sys; sys\\.path\\.insert\\(0, '\\.'\\); from app\\.routes import router; paths=\\[getattr\\(r, 'path', None\\) for r in router\\.routes\\]; print\\(paths\\); assert any\\(p == '/hives' for p in paths\\); assert any\\(p == '/health/\\{hive_id\\}' for p in paths\\); assert any\\(p == '/verify/\\{batch_id\\}' for p in paths\\); assert any\\(p == '/ledger/\\{batch_id\\}' for p in paths\\); print\\('router route import check ok'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^& 'e:/honey-chain/backend/venv/Scripts/python\\.exe' -c \"import sys; sys\\.path\\.insert\\(0, '\\.'\\); from app\\.routes import router; paths=\\[getattr\\(r, 'path', None\\) for r in router\\.routes\\]; print\\(paths\\); assert any\\(p == '/api/hives' for p in paths\\); assert any\\(p == '/api/dashboard' for p in paths\\); assert any\\(p == '/api/health/\\{hive_id\\}' for p in paths\\); assert any\\(p == '/api/verify/\\{batch_id\\}' for p in paths\\); assert any\\(p == '/api/batches/\\{batch_id\\}/qr' for p in paths\\); print\\('router route import check ok'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'E:\\\\honey-chain\\\\backend'; & '\\.\\\\venv\\\\Scripts\\\\python\\.exe' -c \"import sys; sys\\.path\\.insert\\(0, '\\.'\\); from app\\.schemas import SensorCreate; payload=\\{'hive_id':'HIVE001','temperature':27\\.1,'humidity':54\\.0,'weight':118\\.5,'gas_raw':2186,'mic_raw':1733\\}; assert SensorCreate\\(\\*\\*payload\\)\\.model_dump\\(\\) == payload; from app\\.routes import router; assert '/api/sensors' in \\[getattr\\(r, 'path', None\\) for r in router\\.routes\\]; print\\('FastAPI sensor contract and /api/sensors checks passed'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Set-Location 'E:\\\\honey-chain\\\\backend'; & '\\.\\\\venv\\\\Scripts\\\\python\\.exe' -c \"import sys; sys\\.path\\.insert\\(0, '\\.'\\); from app\\.schemas import SensorCreate; payload=\\{'hive_id':'HIVE001','temperature':27\\.1,'humidity':54,'weight':118\\.5,'gas_raw':2186,'mic_raw':1733\\}; assert SensorCreate\\(\\*\\*payload\\)\\.model_dump\\(\\) == payload; from app\\.routes import router; paths=\\[getattr\\(r, 'path', None\\) for r in router\\.routes\\]; expected=\\['/api/sensors','/api/dashboard','/api/health/\\{hive_id\\}','/api/verify/\\{batch_id\\}','/api/batches/\\{batch_id\\}/qr'\\]; assert all\\(path in paths for path in expected\\); print\\('backend route/schema regression passed'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

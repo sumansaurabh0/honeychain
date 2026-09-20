@@ -209,33 +209,46 @@ def require_admin(
 
 
 def ensure_default_admin():
+    admins=[
+        ((os.getenv("ADMIN_EMAIL") or "").strip().lower(),os.getenv("ADMIN_PASSWORD") or "","ADMIN-000"),
+        ((os.getenv("ADMIN2_EMAIL") or "").strip().lower(),os.getenv("ADMIN2_PASSWORD") or "","ADMIN-001"),
+    ]
+
     with SessionLocal() as db:
-        admin_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
-        admin_password = os.getenv("ADMIN_PASSWORD") or ""
+        for admin_email,admin_password,farmer_id in admins:
+            if not admin_email or not admin_password:
+                continue
 
-        if not admin_email or not admin_password:
-            return
+            admin=db.query(Farmer).filter(Farmer.email==admin_email).first()
 
-        admin = db.query(Farmer).filter(Farmer.email == admin_email).first()
-        if admin is not None:
-            return
+            if admin is not None:
+                if admin.role!="ADMIN":
+                    raise RuntimeError(f"Configured admin email belongs to a non-admin account: {admin_email}")
+                salt=secrets.token_hex(16)
+                admin.password_hash=_hash_password(admin_password,salt)
+                admin.password_salt=salt
+                admin.status="VERIFIED"
+                admin.verified_at=admin.verified_at or datetime.utcnow()
+                continue
 
-        salt = secrets.token_hex(16)
-        admin = Farmer(
-            full_name="Honey Chain Admin",
-            email=admin_email,
-            phone="0000000000",
-            farmer_id="ADMIN-000",
-            farm_name="Honey Chain Operations",
-            farm_location="Head Office",
-            experience="Administrator",
-            password_hash=_hash_password(admin_password, salt),
-            password_salt=salt,
-            role="ADMIN",
-            status="VERIFIED",
-            verified_at=datetime.utcnow(),
-        )
-        db.add(admin)
+            if db.query(Farmer.id).filter(Farmer.farmer_id==farmer_id).first():
+                raise RuntimeError(f"Admin farmer_id already exists: {farmer_id}")
+
+            salt=secrets.token_hex(16)
+            db.add(Farmer(
+                full_name="Honey Chain Admin",
+                email=admin_email,
+                phone="0000000000",
+                farmer_id=farmer_id,
+                farm_name="Honey Chain Operations",
+                farm_location="Head Office",
+                experience="Administrator",
+                password_hash=_hash_password(admin_password,salt),
+                password_salt=salt,
+                role="ADMIN",
+                status="VERIFIED",
+                verified_at=datetime.utcnow(),
+            ))
 
         db.commit()
 

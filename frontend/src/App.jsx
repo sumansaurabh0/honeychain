@@ -38,8 +38,9 @@ const formatValue = (value, suffix = '') => (value === null || value === undefin
 
 const formatTimestamp = (value) => {
   if (!value) return 'No timestamp'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+  const normalized = typeof value === 'string' && !/[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? `${value}Z` : value
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })
 }
 
 const getErrorMessage = (error, fallback) => error?.status === 404 ? 'Record not found.' : error?.message === 'Failed to fetch' ? fallback : error?.message || fallback

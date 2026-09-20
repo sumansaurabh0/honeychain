@@ -63,7 +63,19 @@ def test_auth_authorization_and_public_regressions():
             )
             assert admin_login.status_code == 200
             assert admin_login.json()["role"] == "ADMIN"
+            admin_token = admin_login.json()["session_token"]
+            assert admin_token
             assert admin.get("/api/admin/farmers?status=PENDING").json()[0]["farmer_id"] == "FARM-101"
+
+            bearer_admin = TestClient(app)
+            try:
+                bearer_admin.headers.update({"Authorization": f"Bearer {admin_token}"})
+                assert bearer_admin.get("/api/auth/me").status_code == 200
+                assert bearer_admin.get("/api/admin/farmers?status=PENDING").status_code == 200
+                assert bearer_admin.get("/api/auth/me", headers={"Authorization": "Bearer invalid-token"}).status_code == 401
+                assert TestClient(app).get("/api/auth/me").status_code == 401
+            finally:
+                bearer_admin.close()
 
             assert admin.post("/api/admin/farmers/FARM-101/approve").status_code == 200
             verified_login = farmer.post(
@@ -71,9 +83,19 @@ def test_auth_authorization_and_public_regressions():
                 json={"email": "pending@example.com", "password": "StrongPass!123"},
             )
             assert verified_login.status_code == 200
+            farmer_token = verified_login.json()["session_token"]
+            assert farmer_token
             assert farmer.get("/api/auth/me").json()["status"] == "VERIFIED"
+            assert farmer.get("/api/admin/farmers").status_code == 403
 
-            farmer.post("/api/auth/logout")
+            bearer_logout = TestClient(app, headers={"Authorization": f"Bearer {farmer_token}"})
+            try:
+                assert bearer_logout.get("/api/auth/me").status_code == 200
+                assert bearer_logout.post("/api/auth/logout").status_code == 200
+                assert bearer_logout.get("/api/auth/me").status_code == 401
+            finally:
+                bearer_logout.close()
+
             assert farmer.post("/api/batches", json={"batch_id": "HC-AFTER-LOGOUT"}).status_code == 401
 
             rejected = register(anonymous, email="rejected@example.com", farmer_id="FARM-102")

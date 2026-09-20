@@ -7,8 +7,11 @@ const api = (import.meta.env.VITE_API_URL || 'https://honey-chain-backend-tjvt.o
 const HIVE_ID = 'HIVE001'
 
 const request = async (path) => {
-  const response = await fetch(`${api}${path}`, { credentials: 'include' })
+  const sessionToken = sessionStorage.getItem('honeychain_session')
+  const headers = sessionToken ? { Authorization: `Bearer ${sessionToken}` } : undefined
+  const response = await fetch(`${api}${path}`, { credentials: 'include', headers })
   if (!response.ok) {
+    if (response.status === 401) sessionStorage.removeItem('honeychain_session')
     const detail = await response.text().catch(() => '')
     const error = new Error(detail || `Request failed (${response.status})`)
     error.status = response.status
@@ -18,8 +21,11 @@ const request = async (path) => {
 }
 
 const post = async (path, body) => {
-  const response = await fetch(`${api}${path}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const sessionToken = sessionStorage.getItem('honeychain_session')
+  const headers = { 'Content-Type': 'application/json', ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) }
+  const response = await fetch(`${api}${path}`, { method: 'POST', credentials: 'include', headers, body: JSON.stringify(body) })
   if (!response.ok) {
+    if (response.status === 401) sessionStorage.removeItem('honeychain_session')
     const detail = await response.text().catch(() => '')
     const error = new Error(detail || `Request failed (${response.status})`)
     error.status = response.status
@@ -277,6 +283,7 @@ function AuthPage({ mode }) {
         setMessage('Registration submitted. An administrator must verify your farmer account before login.')
         setForm({ full_name: '', email: '', phone: '', farmer_id: '', farm_name: '', farm_location: '', experience: '', password: '', confirm_password: '' })
       } else {
+        sessionStorage.setItem('honeychain_session', result.session_token)
         navigate(result.role === 'ADMIN' ? '/admin' : '/farmer')
       }
     } catch (requestError) {

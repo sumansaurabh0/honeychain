@@ -174,7 +174,16 @@ def _farmers_to_dict(farmer: Farmer) -> Dict[str, Any]:
 
 
 def _get_session_token(request: Request) -> Optional[str]:
-    return request.cookies.get("honeychain_session")
+    cookie_token=request.cookies.get("honeychain_session")
+    if cookie_token:
+        return cookie_token
+
+    authorization=request.headers.get("Authorization", "")
+    scheme, _, token=authorization.partition(" ")
+    if scheme.lower()=="bearer" and token:
+        return token
+
+    return None
 
 
 def get_current_farmer(
@@ -630,7 +639,7 @@ def login_farmer(payload: Dict[str, Any], db: Session = Depends(get_db)):
     farmer.last_login = datetime.utcnow()
     db.commit()
 
-    response = JSONResponse(content={"status": "ok", **_farmers_to_dict(farmer)})
+    response = JSONResponse(content={"status": "ok", "session_token": session, **_farmers_to_dict(farmer)})
     response.set_cookie(
         key="honeychain_session",
         value=session,

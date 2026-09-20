@@ -1876,6 +1876,67 @@ def create_sensor(
         "demo":False,
     }
 
+@app.get("/api/dashboard")
+def dashboard(db:Session=Depends(get_db)):
+    reading=(
+        db.query(SensorReading)
+        .order_by(SensorReading.timestamp.desc())
+        .first()
+    )
+    return {
+        "latest_sensor":None if reading is None else {
+            "id":reading.id,
+            "hive_id":reading.hive_id,
+            "temperature":reading.temperature,
+            "humidity":reading.humidity,
+            "weight":reading.weight,
+            "gas":reading.gas,
+            "acoustic":reading.acoustic,
+            "timestamp":reading.timestamp.isoformat() if reading.timestamp else datetime.utcnow().isoformat(),
+        }
+    }
+
+
+@app.get("/api/sensors/{hive_id}")
+def get_sensor_history(
+    hive_id:str,
+    db:Session=Depends(get_db)
+):
+    readings=(
+        db.query(SensorReading)
+        .filter(SensorReading.hive_id==hive_id)
+        .order_by(SensorReading.timestamp.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id":reading.id,
+            "hive_id":reading.hive_id,
+            "temperature":reading.temperature,
+            "humidity":reading.humidity,
+            "weight":reading.weight,
+            "gas":reading.gas,
+            "acoustic":reading.acoustic,
+            "timestamp":reading.timestamp.isoformat() if reading.timestamp else None,
+        }
+        for reading in readings
+    ]
+
+
+@app.get("/api/health/{hive_id}")
+def hive_health(
+    hive_id:str,
+    db:Session=Depends(get_db)
+):
+    reading=_latest_sensor_for_hive(db,hive_id)
+    result=_build_health_analysis(reading)
+    result["timestamp"]=(
+        reading.timestamp.isoformat()
+        if reading and reading.timestamp
+        else datetime.utcnow().isoformat()
+    )
+    return result
 
 @app.post("/api/sensors/readings")
 def create_sensor_reading(

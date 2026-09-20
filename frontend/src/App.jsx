@@ -48,8 +48,8 @@ const sensorMetrics = [
   { key: 'temperature', label: 'Temperature', unit: '°C', color: '#e07a5f' },
   { key: 'humidity', label: 'Humidity', unit: '%', color: '#3d8b9b' },
   { key: 'weight', label: 'Hive weight', unit: 'g', color: '#d4a72c' },
-  { key: 'gas_raw', label: 'Air / gas level', unit: 'raw', color: '#6c8c63' },
-  { key: 'mic_raw', label: 'Hive activity', unit: 'raw', color: '#8a6f9e' },
+  { key: 'gas', label: 'Air / gas level', unit: 'raw', color: '#6c8c63' },
+  { key: 'acoustic', label: 'Hive activity', unit: 'raw', color: '#8a6f9e' },
 ]
 
 const parseHoneyChainQr = (value) => {

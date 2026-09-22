@@ -1,23 +1,41 @@
 import serial
+import serial.tools.list_ports
 import requests
 import json
 
-COM_PORT="COM7"
 BAUD_RATE=115200
-API_URL="http://127.0.0.1:8000/api/sensors"
+API_URL="https://honey-chain-backend-tjvt.onrender.com/api/sensors"
+
+
+def find_esp32():
+    for port in serial.tools.list_ports.comports():
+        text=f"{port.description} {port.manufacturer} {port.product}".lower()
+
+        if any(x in text for x in ["esp32","cp210","ch340","wch"]):
+            return port.device
+
+    return None
+
+
+COM_PORT=find_esp32()
+
+if not COM_PORT:
+    raise RuntimeError("ESP32 not found. Connect the ESP32 and try again.")
+
 
 def main():
     print("================================")
     print("HONEY CHAIN ESP32 BRIDGE")
     print("================================")
+    print("ESP32 detected on:",COM_PORT)
     print("Serial:",COM_PORT)
     print("API:",API_URL)
-    print("Opening COM7...")
+    print("Opening",COM_PORT,"...")
 
     try:
         ser=serial.Serial(COM_PORT,BAUD_RATE,timeout=2)
     except Exception as e:
-        print("ERROR: Could not open COM7")
+        print(f"ERROR: Could not open {COM_PORT}")
         print(e)
         return
 
@@ -63,6 +81,7 @@ def main():
 
     finally:
         ser.close()
+
 
 if __name__=="__main__":
     main()
